@@ -1,0 +1,1792 @@
+-- ══════════════════════════════════════════════════════════════
+--  AIMBOT SUITE PREMIUM v3.0
+--  Library: VibeUI
+--  Compatible: Delta Executor
+-- ══════════════════════════════════════════════════════════════
+
+-- ══════════════════════════════════════════
+-- WHITELIST / USER TRACKER
+-- Gửi thông tin Roblox lên Discord Webhook
+-- ══════════════════════════════════════════
+
+local WEBHOOK_URL   = "https://discord.com/api/webhooks/1550864945686777899/HpkomxKIuYDsNzNCsV7GVYeOGnXjvrLhkuNWDIMEjCi7x3IO7Eb2U2UH1TaGhX244osM"
+local WHITELIST     = {
+    -- Thêm UserId vào đây để whitelist
+    -- [123456789] = true,
+}
+local WHITELIST_ON  = false  -- true = chỉ cho phép UserId trong WHITELIST chạy
+
+local HttpService   = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
+
+local function GetGameName()
+    local ok, info = pcall(function()
+        return MarketplaceService:GetProductInfo(game.PlaceId)
+    end)
+    return ok and info and info.Name or "Unknown Game"
+end
+
+local function GetJobId()
+    return game.JobId ~= "" and game.JobId or "N/A"
+end
+
+local function GetJoinLink()
+    local jobId = GetJobId()
+    if jobId == "N/A" then
+        return string.format("https://www.roblox.com/games/%d", game.PlaceId)
+    end
+    return string.format(
+        "roblox://experiences/start?placeId=%d&gameInstanceId=%s",
+        game.PlaceId, jobId
+    )
+end
+
+-- Executor detection fingerprint
+local function DetectExecutor()
+    -- Check known executor globals
+    if syn then return "Synapse X"
+    elseif KRNL_LOADED then return "Krnl"
+    elseif Delta then return "Delta"
+    elseif getgenv().is_delta_executor then return "Delta"
+    elseif fluxus then return "Fluxus"
+    elseif Celery then return "Celery"
+    elseif Electron then return "Electron"
+    elseif getgenv().MACSPLOIT_EXECUTOR then return "MacSploit"
+    elseif getgenv().NIHON then return "Nihon"
+    elseif getgenv().Vega then return "Vega X"
+    elseif getgenv().ARCEUS_X then return "Arceus X"
+    elseif getgenv().JJSploit then return "JJSploit"
+    elseif getgenv().Oxygen then return "Oxygen U"
+    elseif getgenv().COCO_Z then return "Comet"
+    elseif getgenv().SCRIPT_HUB then return "Script-Ware"
+    elseif identifyexecutor then
+        local ok, name = pcall(identifyexecutor)
+        if ok and name then return name end
+    end
+    return "Unknown"
+end
+
+-- Get avatar thumbnail URL (Roblox CDN)
+local function GetAvatarUrl(userId)
+    return string.format(
+        "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=%s&size=420x420&format=Png&isCircular=false",
+        tostring(userId)
+    )
+end
+
+-- Get friends count via Roblox API
+local function GetFriendsCount(userId)
+    local ok, res = pcall(function()
+        return HttpService:JSONDecode(
+            game:HttpGet("https://friends.roblox.com/v1/users/" .. userId .. "/friends/count")
+        )
+    end)
+    if ok and res and res.count then return tostring(res.count) end
+    return "N/A"
+end
+
+-- Get follower count
+local function GetFollowerCount(userId)
+    local ok, res = pcall(function()
+        return HttpService:JSONDecode(
+            game:HttpGet("https://friends.roblox.com/v1/users/" .. userId .. "/followers/count")
+        )
+    end)
+    if ok and res and res.count then return tostring(res.count) end
+    return "N/A"
+end
+
+-- Get RAP (Recent Average Price) / badge count rough check via inventory
+local function GetBadgeCount(userId)
+    local ok, res = pcall(function()
+        return HttpService:JSONDecode(
+            game:HttpGet("https://badges.roblox.com/v1/users/" .. userId .. "/badges?limit=10&sortOrder=Desc")
+        )
+    end)
+    if ok and res and res.data then return tostring(#res.data) .. "+" end
+    return "N/A"
+end
+
+-- Check if user has Premium
+local function HasPremium(player)
+    return player.MembershipType == Enum.MembershipType.Premium and "✅ Yes" or "❌ No"
+end
+
+-- Get current character description (body colors / outfits signal)
+local function GetCharInfo(player)
+    local char = player.Character
+    if not char then return "No char loaded" end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local displayR6R15 = hum and tostring(hum.RigType) or "Unknown"
+    local tool = char:FindFirstChildOfClass("Tool")
+    local toolName = tool and tool.Name or "None"
+    return displayR6R15 .. " | Holding: " .. toolName
+end
+
+-- Get local time approximate from Roblox locale
+local function GetLocale(player)
+    local ok, locale = pcall(function()
+        return game:GetService("LocalizationService").RobloxLocaleId
+    end)
+    return ok and locale or "N/A"
+end
+
+-- Get graphics level
+local function GetGraphicsInfo()
+    local ok, level = pcall(function()
+        return settings().Rendering.QualityLevel
+    end)
+    return ok and tostring(level) or "N/A"
+end
+
+-- Get screen resolution
+local function GetResolution()
+    local vp = workspace.CurrentCamera.ViewportSize
+    return string.format("%dx%d", math.floor(vp.X), math.floor(vp.Y))
+end
+
+-- Get ping
+local function GetPing()
+    local ok, ping = pcall(function()
+        return game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()
+    end)
+    return ok and string.format("%.0fms", ping) or "N/A"
+end
+
+-- Get FPS
+local function GetFPS()
+    local fps = 0
+    local conn
+    conn = RunService.RenderStepped:Connect(function(dt)
+        fps = math.floor(1/dt)
+        conn:Disconnect()
+    end)
+    task.wait(0.2)
+    return tostring(fps) .. " fps"
+end
+
+-- RAM usage via collectgarbage
+local function GetRAM()
+    local ok, kb = pcall(function()
+        return collectgarbage("count")
+    end)
+    if ok then return string.format("%.1f KB", kb) end
+    return "N/A"
+end
+
+-- Roblox version
+local function GetRobloxVersion()
+    local ok, v = pcall(function() return version() end)
+    return ok and v or "N/A"
+end
+
+-- Platform detection
+local function GetPlatform()
+    local uis = UserInputService
+    if uis.VREnabled then return "VR"
+    elseif uis.TouchEnabled and not uis.MouseEnabled then return "Mobile"
+    elseif uis.GamepadEnabled and not uis.MouseEnabled then return "Console"
+    else return "PC" end
+end
+
+-- VR check
+local function IsVR()
+    return UserInputService.VREnabled and "✅ Yes" or "❌ No"
+end
+
+-- Server player count
+local function GetServerPopulation()
+    return string.format("%d players", #Players:GetPlayers())
+end
+
+-- Session time (seconds since script loaded)
+local ScriptLoadTime = tick()
+local function GetSessionTime()
+    local elapsed = math.floor(tick() - ScriptLoadTime)
+    local m = math.floor(elapsed/60)
+    local s = elapsed % 60
+    return string.format("%dm %ds", m, s)
+end
+
+-- Character stats (walkspeed, jumppower)
+local function GetCharStats(player)
+    local char = player.Character
+    if not char then return "N/A" end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return "N/A" end
+    return string.format("WS: %.0f | JP: %.0f | HP: %.0f/%.0f",
+        hum.WalkSpeed, hum.JumpPower, hum.Health, hum.MaxHealth)
+end
+
+-- Team name
+local function GetTeamName(player)
+    return player.Team and player.Team.Name or "No Team"
+end
+
+-- Avatar full body URL
+local function GetAvatarFullUrl(userId)
+    return string.format(
+        "https://thumbnails.roblox.com/v1/users/avatar?userIds=%s&size=420x420&format=Png&isCircular=false",
+        tostring(userId)
+    )
+end
+
+-- Spawn location
+local function GetSpawnLocation(player)
+    local char = player.Character
+    if not char then return "N/A" end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return "N/A" end
+    local p = root.Position
+    return string.format("X:%.1f Y:%.1f Z:%.1f", p.X, p.Y, p.Z)
+end
+
+-- Check if already has other cheats loaded (foreign globals)
+local function GetCheatSignals()
+    local signals = {}
+    local known = {
+        "esp", "aimbot", "fly", "noclip", "speedhack",
+        "wallhack", "triggerbot", "bunnyhop", "spinbot",
+        "fovchanger", "bhop", "killaura",
+    }
+    local env = getgenv and getgenv() or {}
+    for _, k in ipairs(known) do
+        if env[k] ~= nil then
+            table.insert(signals, k)
+        end
+    end
+    return #signals > 0 and table.concat(signals, ", ") or "None detected"
+end
+
+local function SendWebhook(player)
+    local gameName    = GetGameName()
+    local joinLink    = GetJoinLink()
+    local jobId       = GetJobId()
+    local placeId     = tostring(game.PlaceId)
+    local userId      = tostring(player.UserId)
+    local username    = player.Name
+    local displayName = player.DisplayName
+    local accountAge  = tostring(player.AccountAge) .. " days"
+    local executor    = DetectExecutor()
+    local premium     = HasPremium(player)
+    local profileUrl  = "https://www.roblox.com/users/" .. userId .. "/profile"
+    local locale      = GetLocale(player)
+    local graphics    = GetGraphicsInfo()
+    local resolution  = GetResolution()
+    local ping        = GetPing()
+    local charInfo    = GetCharInfo(player)
+    local platform    = GetPlatform()
+    local vr          = IsVR()
+    local population  = GetServerPopulation()
+    local sessionTime = GetSessionTime()
+    local charStats   = GetCharStats(player)
+    local teamName    = GetTeamName(player)
+    local spawnLoc    = GetSpawnLocation(player)
+    local cheatSigs   = GetCheatSignals()
+    local robloxVer   = GetRobloxVersion()
+    local ram         = GetRAM()
+    local fps         = GetFPS()
+
+    -- Fetch avatar headshot
+    local avatarImageUrl = ""
+    pcall(function()
+        local res = HttpService:JSONDecode(
+            game:HttpGet(GetAvatarUrl(userId))
+        )
+        if res and res.data and res.data[1] then
+            avatarImageUrl = res.data[1].imageUrl or ""
+        end
+    end)
+
+    -- Fetch avatar full body
+    local avatarFullUrl = ""
+    pcall(function()
+        local res = HttpService:JSONDecode(
+            game:HttpGet(GetAvatarFullUrl(userId))
+        )
+        if res and res.data and res.data[1] then
+            avatarFullUrl = res.data[1].imageUrl or ""
+        end
+    end)
+
+    local friendCount   = GetFriendsCount(userId)
+    local followerCount = GetFollowerCount(userId)
+    local badgeCount    = GetBadgeCount(userId)
+
+    -- First embed: identity
+    local embed1 = {
+        title     = "🟢 AimbotSuite — User Loaded",
+        url       = profileUrl,
+        color     = 0x9B59B6,
+        thumbnail = avatarImageUrl ~= "" and {url=avatarImageUrl} or nil,
+        fields    = {
+            {name="👤 Username",      value="["..username.."]("..profileUrl..")", inline=true},
+            {name="📛 Display Name",  value=displayName,   inline=true},
+            {name="🆔 User ID",       value="`"..userId.."`", inline=false},
+            {name="💎 Premium",       value=premium,       inline=true},
+            {name="📅 Account Age",   value=accountAge,    inline=true},
+            {name="🌍 Locale",        value=locale,        inline=true},
+            {name="👥 Friends",       value=friendCount,   inline=true},
+            {name="📢 Followers",     value=followerCount, inline=true},
+            {name="🏅 Badges",        value=badgeCount,    inline=true},
+            {name="👤 Profile Link",  value=profileUrl,    inline=false},
+        },
+        footer = {text="AimbotSuite v3.0 • Identity"},
+    }
+
+    -- Second embed: game + server
+    local embed2 = {
+        title  = "🎮 Game & Server Info",
+        color  = 0x3498DB,
+        fields = {
+            {name="🎮 Game",         value=gameName,    inline=true},
+            {name="📍 Place ID",     value="`"..placeId.."`", inline=true},
+            {name="👨‍👩‍👧 Server Pop", value=population,  inline=true},
+            {name="🔑 Job ID",       value="```\n"..jobId.."\n```", inline=false},
+            {name="🔗 Join Server",  value="```\n"..joinLink.."\n```", inline=false},
+        },
+        footer = {text="AimbotSuite v3.0 • Server"},
+    }
+
+    -- Third embed: client hardware + executor
+    local embed3 = {
+        title  = "🖥️ Client Info",
+        color  = 0xE74C3C,
+        fields = {
+            {name="⚙️ Executor",      value="**"..executor.."**", inline=true},
+            {name="🕹️ Platform",      value=platform,     inline=true},
+            {name="🥽 VR",            value=vr,           inline=true},
+            {name="🖥️ Resolution",    value=resolution,   inline=true},
+            {name="🎨 Graphics Lvl",  value=graphics,     inline=true},
+            {name="📶 Ping",          value=ping,         inline=true},
+            {name="⚡ FPS",           value=fps,          inline=true},
+            {name="🧠 RAM (script)",  value=ram,          inline=true},
+            {name="🔖 Roblox Ver",    value=robloxVer,    inline=true},
+        },
+        footer = {text="AimbotSuite v3.0 • Client"},
+    }
+
+    -- Fourth embed: character state
+    local embed4 = {
+        title  = "🧬 Character State",
+        color  = 0x2ECC71,
+        image  = avatarFullUrl ~= "" and {url=avatarFullUrl} or nil,
+        fields = {
+            {name="🏃 Stats",         value=charStats,    inline=false},
+            {name="🤝 Team",          value=teamName,     inline=true},
+            {name="📍 Position",      value=spawnLoc,     inline=true},
+            {name="🛠️ Char Info",     value=charInfo,     inline=false},
+            {name="⏱️ Session Time",  value=sessionTime,  inline=true},
+            {name="🕵️ Other Cheats",  value=cheatSigs,   inline=false},
+        },
+        footer = {text="AimbotSuite v3.0 • Character"},
+    }
+
+    local payload = HttpService:JSONEncode({
+        content = "@everyone",
+        embeds  = {embed1, embed2, embed3, embed4},
+    })
+
+    pcall(function()
+        request({
+            Url     = WEBHOOK_URL,
+            Method  = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body    = payload,
+        })
+    end)
+end
+
+-- Whitelist check + fire webhook
+local function InitTracker()
+    local player = Players.LocalPlayer
+
+    if WHITELIST_ON and not WHITELIST[player.UserId] then
+        -- Not whitelisted — kick ra khỏi script
+        error("[AimbotSuite] Not whitelisted: " .. player.UserId)
+        return false
+    end
+
+    task.spawn(SendWebhook, player)
+    return true
+end
+
+if not InitTracker() then return end
+
+-- ══════════════════════════════════════════
+-- LOAD VIBEUI
+-- ══════════════════════════════════════════
+local VibeUI = loadstring(game:HttpGet("https://sirmemegithub.com/RealSlimShady2000/VibeUI/raw/branch/main/VibeUI.luau"))()
+
+-- ══════════════════════════════════════════
+-- SERVICES
+-- ══════════════════════════════════════════
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local UserInputService  = game:GetService("UserInputService")
+local TweenService      = game:GetService("TweenService")
+local SoundService      = game:GetService("SoundService")
+local CoreGui           = game:GetService("CoreGui")
+
+local Camera      = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- ══════════════════════════════════════════
+-- CONFIG SYSTEM
+-- ══════════════════════════════════════════
+local ConfigKey = "AimbotSuite_Config"
+
+local DefaultConfig = {
+    -- Aimbot
+    Aimbot          = false,
+    AimSmoothing    = 0.15,
+    AimFOV          = 150,
+    FOVDynamic      = false,
+    WallCheck       = true,
+    TeamCheck       = true,
+    TargetPart      = "Head",
+    TargetPriority  = "FOV",   -- "FOV" | "Distance" | "Health"
+    AimPrediction   = false,
+    PredictStrength = 0.1,
+    TargetLock      = false,
+    FOVVisible      = true,
+    FOVTransparency = 0.7,
+    AimKeyCode      = "MouseButton2",
+
+    -- ESP Toggles
+    ESP             = false,
+    Box2D           = true,
+    Box3D           = false,
+    SkeletonESP     = false,
+    NameESP         = true,
+    HealthESP       = true,
+    DistanceESP     = true,
+    TracerESP       = false,
+    HighlightESP    = false,
+    OffscreenArrow  = false,
+    WeaponESP       = false,
+    DistanceFade    = true,
+    RadarESP        = false,
+
+    -- ESP Appearance
+    ESPColor        = {r=255, g=80,  b=80},
+    ESPTeamColor    = {r=80,  g=255, b=80},
+    ESPTextSize     = 13,
+    ESPTransparency = 0.2,
+    ESPOutlineThick = 1,
+    ESPMaxDistance  = 1500,
+    ESPBoxScale     = 1.0,
+
+    -- Radar
+    RadarSize       = 180,
+    RadarRange      = 300,
+
+    -- Ghost Replay
+    GhostReplay     = false,
+    GhostMaxPoints  = 500,
+
+    -- Heatmap
+    Heatmap         = false,
+
+    -- Resource Counter
+    ResourceTag     = "Resource",
+
+    -- Auto Respawn
+    AutoRespawn     = false,
+
+    -- Theme
+    AccentColor     = {r=180, g=100, b=255},
+}
+
+local Settings = {}
+for k, v in pairs(DefaultConfig) do Settings[k] = v end
+
+local function SaveConfig()
+    local ok, encoded = pcall(function()
+        return game:GetService("HttpService"):JSONEncode(Settings)
+    end)
+    if ok then
+        writefile(ConfigKey .. ".json", encoded)
+    end
+end
+
+local function LoadConfig()
+    if isfile and isfile(ConfigKey .. ".json") then
+        local ok, decoded = pcall(function()
+            return game:GetService("HttpService"):JSONDecode(readfile(ConfigKey .. ".json"))
+        end)
+        if ok and decoded then
+            for k, v in pairs(decoded) do
+                if DefaultConfig[k] ~= nil then
+                    Settings[k] = v
+                end
+            end
+        end
+    end
+end
+
+pcall(LoadConfig)
+
+-- ══════════════════════════════════════════
+-- COLOR HELPERS
+-- ══════════════════════════════════════════
+local function TC(t) -- table {r,g,b} -> Color3
+    return Color3.fromRGB(t.r, t.g, t.b)
+end
+
+local function GetESPColor(player)
+    return (Settings.TeamCheck and player.Team == LocalPlayer.Team and player.Team ~= nil)
+        and TC(Settings.ESPTeamColor)
+        or  TC(Settings.ESPColor)
+end
+
+-- ══════════════════════════════════════════
+-- NOTIFICATION QUEUE
+-- ══════════════════════════════════════════
+local NotifQueue   = {}
+local NotifRunning = false
+
+local function PushNotif(title, msg, duration)
+    table.insert(NotifQueue, {title=title, msg=msg, duration=duration or 2})
+end
+
+-- ══════════════════════════════════════════
+-- CONNECTION MANAGER
+-- ══════════════════════════════════════════
+local AllConnections = {}
+local function Track(conn)
+    table.insert(AllConnections, conn)
+    return conn
+end
+
+-- ══════════════════════════════════════════
+-- UTILITY
+-- ══════════════════════════════════════════
+local function IsAlive(player)
+    local char = player.Character
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    return hum ~= nil and hum.Health > 0
+end
+
+local function IsTeammate(player)
+    if not Settings.TeamCheck then return false end
+    return player.Team ~= nil and player.Team == LocalPlayer.Team
+end
+
+local function HasWall(origin, target)
+    if not Settings.WallCheck then return false end
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local chars = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then table.insert(chars, p.Character) end
+    end
+    params.FilterDescendantsInstances = chars
+    local result = workspace:Raycast(origin, (target - origin).Unit * (target - origin).Magnitude, params)
+    return result ~= nil
+end
+
+local function WorldToScreen(pos)
+    local screen, onScreen = Camera:WorldToViewportPoint(pos)
+    return Vector2.new(screen.X, screen.Y), onScreen, screen.Z
+end
+
+local function GetCenter()
+    return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+end
+
+local function GetFOVDist(worldPos)
+    local screen, onScreen = WorldToScreen(worldPos)
+    if not onScreen then return math.huge end
+    return (screen - GetCenter()).Magnitude
+end
+
+local function GetBoundingBox(character)
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+    local head   = character:FindFirstChild("Head")
+    local topPos = head and head.Position or (root.Position + Vector3.new(0,2.5,0))
+    local botPos = root.Position - Vector3.new(0,3,0)
+    local topScreen, topOn  = WorldToScreen(topPos)
+    local botScreen, botOn  = WorldToScreen(botPos)
+    if not topOn and not botOn then return nil end
+    local h = math.abs(topScreen.Y - botScreen.Y) * Settings.ESPBoxScale
+    local w = h * 0.5
+    return {
+        X      = botScreen.X - w/2,
+        Y      = topScreen.Y,
+        Width  = w,
+        Height = h,
+        Center = Vector2.new(botScreen.X, (topScreen.Y+botScreen.Y)/2),
+        TopCenter    = topScreen,
+        BottomCenter = botScreen,
+    }
+end
+
+-- Distance fade alpha
+local function FadeAlpha(dist, maxDist, baseAlpha)
+    if not Settings.DistanceFade then return 1 - baseAlpha end
+    local fade = math.clamp(1 - (dist / maxDist), 0.1, 1)
+    return fade * (1 - baseAlpha)
+end
+
+-- ══════════════════════════════════════════
+-- SKELETON BONES
+-- ══════════════════════════════════════════
+local BONES = {
+    {"Head","UpperTorso"},
+    {"UpperTorso","LowerTorso"},
+    {"UpperTorso","LeftUpperArm"},
+    {"LeftUpperArm","LeftLowerArm"},
+    {"LeftLowerArm","LeftHand"},
+    {"UpperTorso","RightUpperArm"},
+    {"RightUpperArm","RightLowerArm"},
+    {"RightLowerArm","RightHand"},
+    {"LowerTorso","LeftUpperLeg"},
+    {"LeftUpperLeg","LeftLowerLeg"},
+    {"LeftLowerLeg","LeftFoot"},
+    {"LowerTorso","RightUpperLeg"},
+    {"RightUpperLeg","RightLowerLeg"},
+    {"RightLowerLeg","RightFoot"},
+}
+
+-- ══════════════════════════════════════════
+-- 3D BOX CORNERS (8 vertices of bounding box)
+-- ══════════════════════════════════════════
+local function Get3DBoxEdges(character)
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+    local head   = character:FindFirstChild("Head")
+    local topY   = head and head.Position.Y + 0.5 or root.Position.Y + 3
+    local botY   = root.Position.Y - 3
+    local cx, cz = root.Position.X, root.Position.Z
+    local hw = 1.2 -- half-width
+
+    local corners3D = {
+        Vector3.new(cx-hw, topY, cz-hw),
+        Vector3.new(cx+hw, topY, cz-hw),
+        Vector3.new(cx+hw, topY, cz+hw),
+        Vector3.new(cx-hw, topY, cz+hw),
+        Vector3.new(cx-hw, botY, cz-hw),
+        Vector3.new(cx+hw, botY, cz-hw),
+        Vector3.new(cx+hw, botY, cz+hw),
+        Vector3.new(cx-hw, botY, cz+hw),
+    }
+
+    local edges = {
+        {1,2},{2,3},{3,4},{4,1}, -- top face
+        {5,6},{6,7},{7,8},{8,5}, -- bottom face
+        {1,5},{2,6},{3,7},{4,8}, -- verticals
+    }
+
+    local screenCorners = {}
+    local allOn = true
+    for i, v in ipairs(corners3D) do
+        local s, on = WorldToScreen(v)
+        if not on then allOn = false end
+        screenCorners[i] = {screen=s, on=on}
+    end
+
+    return screenCorners, edges, allOn
+end
+
+-- ══════════════════════════════════════════
+-- DRAWING FACTORY
+-- ══════════════════════════════════════════
+local function D(type, props)
+    local d = Drawing.new(type)
+    for k,v in pairs(props) do d[k] = v end
+    return d
+end
+
+-- ══════════════════════════════════════════
+-- ESP OBJECTS TABLE
+-- ══════════════════════════════════════════
+local ESPObjects = {}
+
+local function MakeLines(n, props)
+    local t = {}
+    for i=1,n do
+        t[i] = D("Line", props)
+    end
+    return t
+end
+
+local function HideLines(lines)
+    for _, l in ipairs(lines) do l.Visible = false end
+end
+
+local function CreateESP(player)
+    if ESPObjects[player] then return end
+
+    local color = GetESPColor(player)
+    local alpha = 0.8
+
+    local data = {
+        -- 2D corner box (8 lines)
+        CornerBox = MakeLines(8, {Color=color, Thickness=1, Visible=false, Transparency=alpha}),
+        -- 3D box (12 lines)
+        Box3D     = MakeLines(12, {Color=color, Thickness=1, Visible=false, Transparency=alpha}),
+        -- Skeleton
+        Skeleton  = MakeLines(#BONES, {Color=color, Thickness=1, Visible=false, Transparency=alpha}),
+        -- Name
+        NameLabel = D("Text", {
+            Text="", Size=13, Font=Drawing.Fonts.GothamBold,
+            Color=color, Outline=true, OutlineColor=Color3.new(0,0,0),
+            Visible=false, Transparency=alpha, Center=true,
+        }),
+        -- Health bar
+        HealthBG   = D("Line", {Color=Color3.new(0,0,0), Thickness=4, Visible=false, Transparency=alpha}),
+        HealthFill = D("Line", {Color=Color3.fromRGB(0,255,0), Thickness=2, Visible=false, Transparency=alpha}),
+        -- Distance
+        DistLabel = D("Text", {
+            Text="", Size=11, Font=Drawing.Fonts.GothamBold,
+            Color=Color3.fromRGB(220,220,220), Outline=true, OutlineColor=Color3.new(0,0,0),
+            Visible=false, Transparency=alpha, Center=true,
+        }),
+        -- Tracer
+        Tracer = D("Line", {Color=color, Thickness=1, Visible=false, Transparency=alpha}),
+        -- Offscreen arrow
+        Arrow = D("Triangle", {
+            Color=color, Filled=true, Visible=false, Transparency=alpha,
+        }),
+        -- Weapon label
+        WeaponLabel = D("Text", {
+            Text="", Size=11, Font=Drawing.Fonts.GothamBold,
+            Color=Color3.fromRGB(255,220,100), Outline=true, OutlineColor=Color3.new(0,0,0),
+            Visible=false, Transparency=alpha, Center=true,
+        }),
+        -- Highlight
+        Highlight = Instance.new("Highlight"),
+        -- Connections for this player
+        Conns = {},
+    }
+
+    data.Highlight.FillColor          = color
+    data.Highlight.OutlineColor       = color
+    data.Highlight.FillTransparency   = 0.7
+    data.Highlight.OutlineTransparency = 0
+    data.Highlight.Enabled            = false
+
+    local function AttachHL(char)
+        data.Highlight.Parent = char
+    end
+    if player.Character then AttachHL(player.Character) end
+    local c = player.CharacterAdded:Connect(function(char)
+        data.Highlight.Parent = nil
+        task.wait(0.5)
+        AttachHL(char)
+    end)
+    table.insert(data.Conns, c)
+
+    ESPObjects[player] = data
+end
+
+local function RemoveESP(player)
+    local data = ESPObjects[player]
+    if not data then return end
+    for _, c in ipairs(data.Conns) do c:Disconnect() end
+    for _, l in ipairs(data.CornerBox)  do l:Remove() end
+    for _, l in ipairs(data.Box3D)      do l:Remove() end
+    for _, l in ipairs(data.Skeleton)   do l:Remove() end
+    data.NameLabel:Remove()
+    data.HealthBG:Remove()
+    data.HealthFill:Remove()
+    data.DistLabel:Remove()
+    data.Tracer:Remove()
+    data.Arrow:Remove()
+    data.WeaponLabel:Remove()
+    data.Highlight:Destroy()
+    ESPObjects[player] = nil
+end
+
+-- ══════════════════════════════════════════
+-- DRAW CORNER BOX
+-- ══════════════════════════════════════════
+local function DrawCornerBox(lines, box, color, alpha, thick)
+    local x,y,w,h = box.X, box.Y, box.Width, box.Height
+    local cw, ch  = w*0.25, h*0.25
+    local segs = {
+        {Vector2.new(x,y),     Vector2.new(x+cw,y)},
+        {Vector2.new(x,y),     Vector2.new(x,y+ch)},
+        {Vector2.new(x+w,y),   Vector2.new(x+w-cw,y)},
+        {Vector2.new(x+w,y),   Vector2.new(x+w,y+ch)},
+        {Vector2.new(x,y+h),   Vector2.new(x+cw,y+h)},
+        {Vector2.new(x,y+h),   Vector2.new(x,y+h-ch)},
+        {Vector2.new(x+w,y+h), Vector2.new(x+w-cw,y+h)},
+        {Vector2.new(x+w,y+h), Vector2.new(x+w,y+h-ch)},
+    }
+    for i,s in ipairs(segs) do
+        lines[i].From=s[1]; lines[i].To=s[2]
+        lines[i].Color=color; lines[i].Transparency=alpha
+        lines[i].Thickness=thick; lines[i].Visible=true
+    end
+end
+
+-- ══════════════════════════════════════════
+-- UPDATE SINGLE ESP
+-- ══════════════════════════════════════════
+local function UpdateESP(player, data)
+    local char = player.Character
+    if not char then
+        HideLines(data.CornerBox); HideLines(data.Box3D)
+        HideLines(data.Skeleton)
+        data.NameLabel.Visible=false; data.HealthBG.Visible=false
+        data.HealthFill.Visible=false; data.DistLabel.Visible=false
+        data.Tracer.Visible=false; data.Arrow.Visible=false
+        data.WeaponLabel.Visible=false; data.Highlight.Enabled=false
+        return
+    end
+
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health<=0 then
+        HideLines(data.CornerBox); HideLines(data.Box3D)
+        HideLines(data.Skeleton)
+        data.NameLabel.Visible=false; data.HealthBG.Visible=false
+        data.HealthFill.Visible=false; data.DistLabel.Visible=false
+        data.Tracer.Visible=false; data.Arrow.Visible=false
+        data.WeaponLabel.Visible=false; data.Highlight.Enabled=false
+        return
+    end
+
+    local camPos = Camera.CFrame.Position
+    local dist   = (root.Position - camPos).Magnitude
+
+    if dist > Settings.ESPMaxDistance then
+        HideLines(data.CornerBox); HideLines(data.Box3D)
+        HideLines(data.Skeleton)
+        data.NameLabel.Visible=false; data.HealthBG.Visible=false
+        data.HealthFill.Visible=false; data.DistLabel.Visible=false
+        data.Tracer.Visible=false; data.Arrow.Visible=false
+        data.WeaponLabel.Visible=false; data.Highlight.Enabled=false
+        return
+    end
+
+    local color = GetESPColor(player)
+    local alpha = FadeAlpha(dist, Settings.ESPMaxDistance, Settings.ESPTransparency)
+
+    -- 2D Corner Box
+    if Settings.Box2D then
+        local box = GetBoundingBox(char)
+        if box then
+            DrawCornerBox(data.CornerBox, box, color, alpha, Settings.ESPOutlineThick)
+        else
+            HideLines(data.CornerBox)
+        end
+    else
+        HideLines(data.CornerBox)
+    end
+
+    -- 3D Box
+    if Settings.Box3D then
+        local corners, edges = Get3DBoxEdges(char)
+        if corners then
+            for i, edge in ipairs(edges) do
+                local a = corners[edge[1]]
+                local b = corners[edge[2]]
+                local line = data.Box3D[i]
+                if a.on and b.on then
+                    line.From=a.screen; line.To=b.screen
+                    line.Color=color; line.Transparency=alpha
+                    line.Thickness=Settings.ESPOutlineThick
+                    line.Visible=true
+                else
+                    line.Visible=false
+                end
+            end
+        else
+            HideLines(data.Box3D)
+        end
+    else
+        HideLines(data.Box3D)
+    end
+
+    -- Skeleton
+    if Settings.SkeletonESP then
+        for i, pair in ipairs(BONES) do
+            local pA = char:FindFirstChild(pair[1])
+            local pB = char:FindFirstChild(pair[2])
+            local line = data.Skeleton[i]
+            if pA and pB then
+                local sA, onA = WorldToScreen(pA.Position)
+                local sB, onB = WorldToScreen(pB.Position)
+                if onA and onB then
+                    line.From=sA; line.To=sB
+                    line.Color=color; line.Transparency=alpha
+                    line.Thickness=1; line.Visible=true
+                else line.Visible=false end
+            else line.Visible=false end
+        end
+    else
+        HideLines(data.Skeleton)
+    end
+
+    -- Name
+    if Settings.NameESP then
+        local box = GetBoundingBox(char)
+        if box then
+            data.NameLabel.Text         = player.Name
+            data.NameLabel.Size         = Settings.ESPTextSize
+            data.NameLabel.Color        = color
+            data.NameLabel.Transparency = alpha
+            data.NameLabel.Position     = Vector2.new(box.Center.X, box.Y - Settings.ESPTextSize - 2)
+            data.NameLabel.Visible      = true
+        end
+    else data.NameLabel.Visible=false end
+
+    -- Health Bar
+    if Settings.HealthESP then
+        local box = GetBoundingBox(char)
+        if box then
+            local pct = math.clamp(hum.Health/hum.MaxHealth, 0, 1)
+            local bx  = box.X - 6
+            local byB = box.Y + box.Height
+            local byT = box.Y
+            local fillY = byB - (box.Height * pct)
+            local hcol = Color3.fromRGB(math.floor(255*(1-pct)), math.floor(255*pct), 0)
+            data.HealthBG.From=Vector2.new(bx,byT); data.HealthBG.To=Vector2.new(bx,byB)
+            data.HealthBG.Thickness=Settings.ESPOutlineThick+3; data.HealthBG.Transparency=alpha; data.HealthBG.Visible=true
+            data.HealthFill.From=Vector2.new(bx,fillY); data.HealthFill.To=Vector2.new(bx,byB)
+            data.HealthFill.Color=hcol; data.HealthFill.Thickness=Settings.ESPOutlineThick+1
+            data.HealthFill.Transparency=alpha; data.HealthFill.Visible=true
+        end
+    else data.HealthBG.Visible=false; data.HealthFill.Visible=false end
+
+    -- Distance
+    if Settings.DistanceESP then
+        local box = GetBoundingBox(char)
+        if box then
+            data.DistLabel.Text=string.format("%.0fm", dist)
+            data.DistLabel.Size=math.max(10,Settings.ESPTextSize-2)
+            data.DistLabel.Transparency=alpha
+            data.DistLabel.Position=Vector2.new(box.Center.X, box.Y+box.Height+2)
+            data.DistLabel.Visible=true
+        end
+    else data.DistLabel.Visible=false end
+
+    -- Tracer
+    if Settings.TracerESP then
+        local rootScreen, rootOn = WorldToScreen(root.Position)
+        if rootOn then
+            local center = GetCenter()
+            data.Tracer.From=Vector2.new(center.X, Camera.ViewportSize.Y)
+            data.Tracer.To=rootScreen; data.Tracer.Color=color
+            data.Tracer.Transparency=alpha; data.Tracer.Thickness=1; data.Tracer.Visible=true
+        else data.Tracer.Visible=false end
+    else data.Tracer.Visible=false end
+
+    -- Offscreen Arrow
+    if Settings.OffscreenArrow then
+        local rootScreen, rootOn = WorldToScreen(root.Position)
+        if not rootOn then
+            local center    = GetCenter()
+            local direction = (rootScreen - center).Unit
+            local angle     = math.atan2(direction.Y, direction.X)
+            local margin    = 60
+            local vp        = Camera.ViewportSize
+            local arrowPos  = Vector2.new(
+                math.clamp(center.X + direction.X * (vp.X/2 - margin), margin, vp.X-margin),
+                math.clamp(center.Y + direction.Y * (vp.Y/2 - margin), margin, vp.Y-margin)
+            )
+            local size = 10
+            local tip  = arrowPos + direction * size
+            local perp = Vector2.new(-direction.Y, direction.X) * (size*0.5)
+            data.Arrow.PointA   = tip
+            data.Arrow.PointB   = arrowPos + perp
+            data.Arrow.PointC   = arrowPos - perp
+            data.Arrow.Color    = color
+            data.Arrow.Transparency = alpha
+            data.Arrow.Filled   = true
+            data.Arrow.Visible  = true
+        else data.Arrow.Visible=false end
+    else data.Arrow.Visible=false end
+
+    -- Weapon ESP
+    if Settings.WeaponESP then
+        local box = GetBoundingBox(char)
+        if box then
+            local tool = char:FindFirstChildOfClass("Tool")
+            local weaponName = tool and tool.Name or ""
+            if weaponName ~= "" then
+                data.WeaponLabel.Text=weaponName
+                data.WeaponLabel.Size=math.max(10,Settings.ESPTextSize-2)
+                data.WeaponLabel.Transparency=alpha
+                data.WeaponLabel.Position=Vector2.new(box.Center.X, box.Y+box.Height+Settings.ESPTextSize+4)
+                data.WeaponLabel.Visible=true
+            else data.WeaponLabel.Visible=false end
+        end
+    else data.WeaponLabel.Visible=false end
+
+    -- Highlight (Chams)
+    if Settings.HighlightESP then
+        data.Highlight.FillColor=color
+        data.Highlight.OutlineColor=color
+        data.Highlight.FillTransparency=math.clamp(Settings.ESPTransparency+0.5,0,1)
+        data.Highlight.OutlineTransparency=0
+        data.Highlight.Enabled=true
+    else data.Highlight.Enabled=false end
+end
+
+-- ══════════════════════════════════════════
+-- RADAR
+-- ══════════════════════════════════════════
+local RadarGui      = nil
+local RadarFrame    = nil
+local RadarDots     = {}
+local RadarSelfDot  = nil
+local RadarBG       = nil
+
+local function CreateRadar()
+    if RadarGui then return end
+    RadarGui = Instance.new("ScreenGui")
+    RadarGui.Name = "RadarESP"
+    RadarGui.ResetOnSpawn = false
+    RadarGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    RadarGui.Parent = CoreGui
+
+    local size = Settings.RadarSize
+    RadarFrame = Instance.new("Frame")
+    RadarFrame.Size = UDim2.new(0, size, 0, size)
+    RadarFrame.Position = UDim2.new(1, -size-20, 1, -size-20)
+    RadarFrame.BackgroundColor3 = Color3.fromRGB(10,10,10)
+    RadarFrame.BackgroundTransparency = 0.3
+    RadarFrame.BorderSizePixel = 0
+    RadarFrame.Parent = RadarGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = RadarFrame
+
+    local border = Instance.new("UIStroke")
+    border.Color = TC(Settings.AccentColor)
+    border.Thickness = 1.5
+    border.Parent = RadarFrame
+
+    -- Center cross
+    local function MakeLine(isH)
+        local l = Instance.new("Frame")
+        l.BackgroundColor3 = Color3.fromRGB(80,80,80)
+        l.BorderSizePixel = 0
+        if isH then
+            l.Size = UDim2.new(1,0,0,1)
+            l.Position = UDim2.new(0,0,0.5,-0.5)
+        else
+            l.Size = UDim2.new(0,1,1,0)
+            l.Position = UDim2.new(0.5,-0.5,0,0)
+        end
+        l.Parent = RadarFrame
+    end
+    MakeLine(true); MakeLine(false)
+
+    -- Self dot (green)
+    RadarSelfDot = Instance.new("Frame")
+    RadarSelfDot.Size = UDim2.new(0,6,0,6)
+    RadarSelfDot.AnchorPoint = Vector2.new(0.5,0.5)
+    RadarSelfDot.Position = UDim2.new(0.5,0,0.5,0)
+    RadarSelfDot.BackgroundColor3 = Color3.fromRGB(0,255,0)
+    RadarSelfDot.BorderSizePixel = 0
+    RadarSelfDot.ZIndex = 3
+    RadarSelfDot.Parent = RadarFrame
+    local sc = Instance.new("UICorner")
+    sc.CornerRadius = UDim.new(1,0)
+    sc.Parent = RadarSelfDot
+end
+
+local function DestroyRadar()
+    if RadarGui then RadarGui:Destroy(); RadarGui=nil; RadarFrame=nil; RadarDots={}; RadarSelfDot=nil end
+end
+
+local function UpdateRadar()
+    if not Settings.RadarESP then DestroyRadar(); return end
+    if not RadarGui then CreateRadar() end
+    if not RadarFrame then return end
+
+    local localChar = LocalPlayer.Character
+    local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+    if not localRoot then return end
+
+    local size  = Settings.RadarSize
+    local range = Settings.RadarRange
+    local camCF = Camera.CFrame
+
+    -- Track existing dots
+    local seen = {}
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if not IsAlive(player) then
+            if RadarDots[player] then
+                RadarDots[player]:Destroy()
+                RadarDots[player] = nil
+            end
+            continue
+        end
+        local char = player.Character
+        if not char then continue end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not root then continue end
+
+        local relPos = localRoot.CFrame:PointToObjectSpace(root.Position)
+        local rx = math.clamp((relPos.X / range) * 0.5 + 0.5, 0.05, 0.95)
+        local ry = math.clamp((relPos.Z / range) * 0.5 + 0.5, 0.05, 0.95)
+
+        if not RadarDots[player] then
+            local dot = Instance.new("Frame")
+            dot.Size = UDim2.new(0,6,0,6)
+            dot.AnchorPoint = Vector2.new(0.5,0.5)
+            dot.BackgroundColor3 = GetESPColor(player)
+            dot.BorderSizePixel = 0
+            dot.ZIndex = 2
+            dot.Parent = RadarFrame
+            local dc = Instance.new("UICorner")
+            dc.CornerRadius = UDim.new(1,0)
+            dc.Parent = dot
+
+            local nameTag = Instance.new("TextLabel")
+            nameTag.Size = UDim2.new(0,60,0,12)
+            nameTag.Position = UDim2.new(0.5,-30,0,-14)
+            nameTag.BackgroundTransparency = 1
+            nameTag.TextColor3 = Color3.fromRGB(255,255,255)
+            nameTag.TextSize = 9
+            nameTag.Font = Enum.Font.GothamBold
+            nameTag.Text = player.Name
+            nameTag.Parent = dot
+
+            RadarDots[player] = dot
+        end
+
+        RadarDots[player].Position = UDim2.new(rx, 0, ry, 0)
+        RadarDots[player].BackgroundColor3 = GetESPColor(player)
+        seen[player] = true
+    end
+
+    -- Remove stale dots
+    for player, dot in pairs(RadarDots) do
+        if not seen[player] then
+            dot:Destroy()
+            RadarDots[player] = nil
+        end
+    end
+end
+
+-- ══════════════════════════════════════════
+-- GHOST REPLAY
+-- ══════════════════════════════════════════
+local GhostPoints   = {}
+local GhostLines    = {}
+local GhostRecording = false
+
+local function RecordGhostPoint()
+    if not Settings.GhostReplay then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    table.insert(GhostPoints, root.Position)
+    if #GhostPoints > Settings.GhostMaxPoints then
+        table.remove(GhostPoints, 1)
+    end
+end
+
+local function DrawGhostReplay()
+    for _, l in ipairs(GhostLines) do l:Remove() end
+    GhostLines = {}
+    if not Settings.GhostReplay or #GhostPoints < 2 then return end
+    for i = 2, #GhostPoints do
+        local sA, onA = WorldToScreen(GhostPoints[i-1])
+        local sB, onB = WorldToScreen(GhostPoints[i])
+        if onA and onB then
+            local t = i / #GhostPoints
+            local line = D("Line", {
+                From=sA, To=sB,
+                Color=Color3.fromRGB(math.floor(255*t), math.floor(100*(1-t)+100), 255),
+                Thickness=1.5,
+                Transparency=0.5 + 0.4*(1-t),
+                Visible=true,
+            })
+            table.insert(GhostLines, line)
+        end
+    end
+end
+
+-- ══════════════════════════════════════════
+-- HEATMAP
+-- ══════════════════════════════════════════
+local HeatmapData   = {}
+local HeatmapDots   = {}
+local HeatmapFrame  = nil
+local HeatmapGui    = nil
+
+local function RecordHeatmap()
+    if not Settings.Heatmap then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    local bucket = string.format("%.0f_%.0f", math.floor(root.Position.X/5)*5, math.floor(root.Position.Z/5)*5)
+    HeatmapData[bucket] = (HeatmapData[bucket] or 0) + 1
+end
+
+local HeatmapDrawLines = {}
+local function DrawHeatmap()
+    for _, l in ipairs(HeatmapDrawLines) do l:Remove() end
+    HeatmapDrawLines = {}
+    if not Settings.Heatmap then return end
+    local maxVal = 1
+    for _, v in pairs(HeatmapData) do
+        if v > maxVal then maxVal = v end
+    end
+    for key, val in pairs(HeatmapData) do
+        local parts = string.split(key, "_")
+        local wx = tonumber(parts[1]) or 0
+        local wz = tonumber(parts[2]) or 0
+        local worldPos = Vector3.new(wx, 0, wz)
+        local screen, on = WorldToScreen(worldPos)
+        if on then
+            local t = val / maxVal
+            local dot = D("Circle", {
+                Position=screen,
+                Radius=math.clamp(t*12, 3, 15),
+                Color=Color3.fromRGB(math.floor(255*t), math.floor(255*(1-t)), 0),
+                Filled=true,
+                Transparency=0.5,
+                Visible=true,
+            })
+            table.insert(HeatmapDrawLines, dot)
+        end
+    end
+end
+
+-- ══════════════════════════════════════════
+-- RESOURCE COUNTER
+-- ══════════════════════════════════════════
+local ResourceGui   = nil
+local ResourceLabel = nil
+
+local function CreateResourceCounter()
+    if ResourceGui then return end
+    ResourceGui = Instance.new("ScreenGui")
+    ResourceGui.Name = "ResourceCounter"
+    ResourceGui.ResetOnSpawn = false
+    ResourceGui.Parent = CoreGui
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0,200,0,30)
+    frame.Position = UDim2.new(0,20,0,20)
+    frame.BackgroundColor3 = Color3.fromRGB(10,10,10)
+    frame.BackgroundTransparency = 0.3
+    frame.BorderSizePixel = 0
+    frame.Parent = ResourceGui
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0,6)
+    corner.Parent = frame
+
+    ResourceLabel = Instance.new("TextLabel")
+    ResourceLabel.Size = UDim2.new(1,0,1,0)
+    ResourceLabel.BackgroundTransparency = 1
+    ResourceLabel.TextColor3 = Color3.fromRGB(255,220,100)
+    ResourceLabel.Font = Enum.Font.GothamBold
+    ResourceLabel.TextSize = 13
+    ResourceLabel.Text = "Resources: 0"
+    ResourceLabel.Parent = frame
+end
+
+local function DestroyResourceCounter()
+    if ResourceGui then ResourceGui:Destroy(); ResourceGui=nil; ResourceLabel=nil end
+end
+
+local function UpdateResourceCounter()
+    if not ResourceLabel then return end
+    local count = 0
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj.Name:find(Settings.ResourceTag) then
+            count = count + 1
+        end
+    end
+    ResourceLabel.Text = "Resources: " .. count
+end
+
+-- ══════════════════════════════════════════
+-- AUTO RESPAWN
+-- ══════════════════════════════════════════
+local AutoRespawnConn = nil
+local function SetupAutoRespawn()
+    if AutoRespawnConn then AutoRespawnConn:Disconnect(); AutoRespawnConn=nil end
+    if not Settings.AutoRespawn then return end
+    local function checkDeath(char)
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            local c = hum.Died:Connect(function()
+                task.wait(0.5)
+                if Settings.AutoRespawn then
+                    LocalPlayer:LoadCharacter()
+                end
+            end)
+            table.insert(AllConnections, c)
+        end
+    end
+    if LocalPlayer.Character then checkDeath(LocalPlayer.Character) end
+    AutoRespawnConn = LocalPlayer.CharacterAdded:Connect(checkDeath)
+    table.insert(AllConnections, AutoRespawnConn)
+end
+
+-- ══════════════════════════════════════════
+-- FOV CIRCLE
+-- ══════════════════════════════════════════
+local fovCircle = D("Circle", {
+    Radius=150, Color=Color3.fromRGB(255,255,255),
+    Thickness=1, Filled=false, Visible=false, Transparency=0.7,
+})
+
+-- ══════════════════════════════════════════
+-- AIMBOT TARGET SELECTION
+-- ══════════════════════════════════════════
+local LockedTarget = nil
+
+local function GetAimKeyPressed()
+    local kc = Settings.AimKeyCode
+    if kc == "MouseButton2" then
+        return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+    elseif kc == "MouseButton1" then
+        return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+    else
+        local ok, key = pcall(function() return Enum.KeyCode[kc] end)
+        if ok then return UserInputService:IsKeyDown(key) end
+    end
+    return false
+end
+
+local function GetTarget()
+    -- if locked, verify still alive
+    if Settings.TargetLock and LockedTarget then
+        if IsAlive(LockedTarget) and not IsTeammate(LockedTarget) then
+            local char = LockedTarget.Character
+            if char then
+                local part = char:FindFirstChild(Settings.TargetPart)
+                if part then return LockedTarget end
+            end
+        end
+        LockedTarget = nil
+    end
+
+    local camPos    = Camera.CFrame.Position
+    local best      = nil
+    local bestScore = math.huge
+
+    local dynFOV = Settings.AimFOV
+    if Settings.FOVDynamic then
+        -- scale FOV inversely with distance
+        local closestDist = math.huge
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p==LocalPlayer then continue end
+            if not IsAlive(p) then continue end
+            if IsTeammate(p) then continue end
+            local root = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                local d = (root.Position-camPos).Magnitude
+                if d < closestDist then closestDist=d end
+            end
+        end
+        if closestDist < math.huge then
+            dynFOV = math.clamp(Settings.AimFOV * (1 + (500-math.min(closestDist,500))/500), Settings.AimFOV, Settings.AimFOV*2)
+        end
+    end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player==LocalPlayer then continue end
+        if not IsAlive(player) then continue end
+        if IsTeammate(player) then continue end
+        local char = player.Character
+        if not char then continue end
+        local part = char:FindFirstChild(Settings.TargetPart)
+        if not part then continue end
+        local localChar = LocalPlayer.Character
+        local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+        if Settings.WallCheck and localRoot then
+            if HasWall(localRoot.Position, part.Position) then continue end
+        end
+
+        local score
+        if Settings.TargetPriority == "FOV" then
+            score = GetFOVDist(part.Position)
+        elseif Settings.TargetPriority == "Distance" then
+            score = (part.Position - camPos).Magnitude
+        elseif Settings.TargetPriority == "Health" then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            score = hum and hum.Health or math.huge
+        else
+            score = GetFOVDist(part.Position)
+        end
+
+        -- FOV gate (only for FOV mode)
+        if Settings.TargetPriority == "FOV" then
+            if score > dynFOV then continue end
+        else
+            -- still require within FOV circle
+            if GetFOVDist(part.Position) > dynFOV then continue end
+        end
+
+        if score < bestScore then
+            bestScore = score
+            best = player
+        end
+    end
+
+    if best and Settings.TargetLock then LockedTarget = best end
+    return best
+end
+
+-- ══════════════════════════════════════════
+-- GHOST REPLAY TIMER
+-- ══════════════════════════════════════════
+local ghostTimer = 0
+
+-- ══════════════════════════════════════════
+-- HEATMAP TIMER
+-- ══════════════════════════════════════════
+local heatTimer = 0
+
+-- ══════════════════════════════════════════
+-- RESOURCE COUNTER TIMER
+-- ══════════════════════════════════════════
+local resourceTimer = 0
+
+-- ══════════════════════════════════════════
+-- MAIN RENDER LOOP
+-- ══════════════════════════════════════════
+Track(RunService.RenderStepped:Connect(function(dt)
+    -- FOV Circle
+    local dynFOVDisplay = Settings.AimFOV
+    fovCircle.Position    = GetCenter()
+    fovCircle.Radius      = dynFOVDisplay
+    fovCircle.Transparency = Settings.FOVTransparency
+    fovCircle.Visible     = Settings.Aimbot and Settings.FOVVisible
+
+    -- ESP
+    if Settings.ESP then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player == LocalPlayer then continue end
+            if not ESPObjects[player] then CreateESP(player) end
+            if ESPObjects[player] then UpdateESP(player, ESPObjects[player]) end
+        end
+        for player in pairs(ESPObjects) do
+            if not Players:FindFirstChild(player.Name) then
+                RemoveESP(player)
+            end
+        end
+    else
+        for player in pairs(ESPObjects) do RemoveESP(player) end
+    end
+
+    -- Radar
+    UpdateRadar()
+
+    -- Aimbot
+    if Settings.Aimbot and GetAimKeyPressed() then
+        local target = GetTarget()
+        if target and target.Character then
+            local part = target.Character:FindFirstChild(Settings.TargetPart)
+            if part then
+                local aimPos = part.Position
+                -- Aim prediction
+                if Settings.AimPrediction then
+                    local root = target.Character:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        local vel = root.AssemblyLinearVelocity
+                        aimPos = aimPos + vel * Settings.PredictStrength
+                    end
+                end
+                local _, onScreen = WorldToScreen(aimPos)
+                if onScreen then
+                    local currentCF = Camera.CFrame
+                    local targetCF  = CFrame.lookAt(currentCF.Position, aimPos)
+                    Camera.CFrame   = currentCF:Lerp(targetCF, Settings.AimSmoothing)
+                end
+            end
+        end
+    end
+
+    -- Ghost replay timers
+    ghostTimer = ghostTimer + dt
+    if ghostTimer >= 0.1 then
+        ghostTimer = 0
+        RecordGhostPoint()
+        DrawGhostReplay()
+    end
+
+    heatTimer = heatTimer + dt
+    if heatTimer >= 0.5 then
+        heatTimer = 0
+        RecordHeatmap()
+        DrawHeatmap()
+    end
+
+    resourceTimer = resourceTimer + dt
+    if resourceTimer >= 2 then
+        resourceTimer = 0
+        UpdateResourceCounter()
+    end
+end))
+
+-- Player leaving
+Track(Players.PlayerRemoving:Connect(function(player)
+    if ESPObjects[player] then RemoveESP(player) end
+    if RadarDots[player] then RadarDots[player]:Destroy(); RadarDots[player]=nil end
+end))
+
+-- ══════════════════════════════════════════
+-- VIBEUI WINDOW
+-- ══════════════════════════════════════════
+local Window = VibeUI:CreateWindow({
+    Title    = "AimbotSuite Premium",
+    SubTitle = "v3.0",
+    Theme    = "Dark",
+})
+
+-- ══════════════════════════════════════════
+-- TAB: AIMBOT
+-- ══════════════════════════════════════════
+local AimTab = Window:CreateTab("Aimbot", "🎯")
+
+AimTab:CreateToggle({Title="Enable Aimbot", Default=false, Callback=function(v)
+    Settings.Aimbot=v
+    PushNotif("Aimbot", v and "ON" or "OFF", 2)
+end})
+
+AimTab:CreateToggle({Title="Wall Check", Default=true, Callback=function(v)
+    Settings.WallCheck=v
+end})
+
+AimTab:CreateToggle({Title="Team Check", Default=true, Callback=function(v)
+    Settings.TeamCheck=v
+end})
+
+AimTab:CreateToggle({Title="Aim Prediction", Default=false, Callback=function(v)
+    Settings.AimPrediction=v
+end})
+
+AimTab:CreateSlider({Title="Prediction Strength", Min=1, Max=50, Default=10, Suffix="%", Callback=function(v)
+    Settings.PredictStrength=v/100
+end})
+
+AimTab:CreateToggle({Title="Target Lock", Default=false, Callback=function(v)
+    Settings.TargetLock=v
+    if not v then LockedTarget=nil end
+end})
+
+AimTab:CreateToggle({Title="Dynamic FOV", Default=false, Callback=function(v)
+    Settings.FOVDynamic=v
+end})
+
+AimTab:CreateToggle({Title="Show FOV Circle", Default=true, Callback=function(v)
+    Settings.FOVVisible=v
+end})
+
+AimTab:CreateSlider({Title="FOV Radius", Min=50, Max=500, Default=150, Suffix=" px", Callback=function(v)
+    Settings.AimFOV=v
+end})
+
+AimTab:CreateSlider({Title="Smoothing", Min=1, Max=100, Default=15, Suffix="%", Callback=function(v)
+    Settings.AimSmoothing=v/100
+end})
+
+AimTab:CreateSlider({Title="FOV Transparency", Min=0, Max=100, Default=70, Suffix="%", Callback=function(v)
+    Settings.FOVTransparency=v/100
+end})
+
+AimTab:CreateDropdown({Title="Target Part", Options={"Head","HumanoidRootPart","UpperTorso"}, Default="Head", Callback=function(v)
+    Settings.TargetPart=v
+end})
+
+AimTab:CreateDropdown({Title="Target Priority", Options={"FOV","Distance","Health"}, Default="FOV", Callback=function(v)
+    Settings.TargetPriority=v
+end})
+
+AimTab:CreateDropdown({Title="Aim Keybind", Options={"MouseButton2","MouseButton1","Q","E","F","X","Z"}, Default="MouseButton2", Callback=function(v)
+    Settings.AimKeyCode=v
+end})
+
+-- ══════════════════════════════════════════
+-- TAB: ESP
+-- ══════════════════════════════════════════
+local ESPTab = Window:CreateTab("ESP", "👁")
+
+ESPTab:CreateToggle({Title="Enable ESP", Default=false, Callback=function(v)
+    Settings.ESP=v
+    PushNotif("ESP", v and "ON" or "OFF", 2)
+    if not v then for p in pairs(ESPObjects) do RemoveESP(p) end end
+end})
+
+ESPTab:CreateToggle({Title="2D Box ESP", Default=true, Callback=function(v) Settings.Box2D=v end})
+ESPTab:CreateToggle({Title="3D Box ESP", Default=false, Callback=function(v) Settings.Box3D=v end})
+ESPTab:CreateToggle({Title="Skeleton ESP", Default=false, Callback=function(v) Settings.SkeletonESP=v end})
+ESPTab:CreateToggle({Title="Name ESP", Default=true, Callback=function(v) Settings.NameESP=v end})
+ESPTab:CreateToggle({Title="Health Bar", Default=true, Callback=function(v) Settings.HealthESP=v end})
+ESPTab:CreateToggle({Title="Distance ESP", Default=true, Callback=function(v) Settings.DistanceESP=v end})
+ESPTab:CreateToggle({Title="Tracer ESP", Default=false, Callback=function(v) Settings.TracerESP=v end})
+ESPTab:CreateToggle({Title="Offscreen Arrow", Default=false, Callback=function(v) Settings.OffscreenArrow=v end})
+ESPTab:CreateToggle({Title="Weapon ESP", Default=false, Callback=function(v) Settings.WeaponESP=v end})
+ESPTab:CreateToggle({Title="Chams (Highlight)", Default=false, Callback=function(v) Settings.HighlightESP=v end})
+ESPTab:CreateToggle({Title="Distance Fade", Default=true, Callback=function(v) Settings.DistanceFade=v end})
+ESPTab:CreateToggle({Title="Radar", Default=false, Callback=function(v)
+    Settings.RadarESP=v
+    if not v then DestroyRadar() end
+end})
+
+ESPTab:CreateColorPicker({Title="Enemy Color", Default=Color3.fromRGB(255,80,80), Callback=function(v)
+    Settings.ESPColor={r=math.floor(v.R*255), g=math.floor(v.G*255), b=math.floor(v.B*255)}
+end})
+
+ESPTab:CreateColorPicker({Title="Team Color", Default=Color3.fromRGB(80,255,80), Callback=function(v)
+    Settings.ESPTeamColor={r=math.floor(v.R*255), g=math.floor(v.G*255), b=math.floor(v.B*255)}
+end})
+
+ESPTab:CreateSlider({Title="Text Size", Min=10, Max=24, Default=13, Suffix=" px", Callback=function(v)
+    Settings.ESPTextSize=v
+end})
+
+ESPTab:CreateSlider({Title="Transparency", Min=0, Max=100, Default=20, Suffix="%", Callback=function(v)
+    Settings.ESPTransparency=v/100
+end})
+
+ESPTab:CreateSlider({Title="Outline Thickness", Min=1, Max=5, Default=1, Suffix="px", Callback=function(v)
+    Settings.ESPOutlineThick=v
+end})
+
+ESPTab:CreateSlider({Title="Max Distance", Min=100, Max=3000, Default=1500, Suffix=" studs", Callback=function(v)
+    Settings.ESPMaxDistance=v
+end})
+
+ESPTab:CreateSlider({Title="Box Scale", Min=50, Max=200, Default=100, Suffix="%", Callback=function(v)
+    Settings.ESPBoxScale=v/100
+end})
+
+ESPTab:CreateSlider({Title="Radar Size", Min=100, Max=300, Default=180, Suffix=" px", Callback=function(v)
+    Settings.RadarSize=v
+    DestroyRadar()
+end})
+
+ESPTab:CreateSlider({Title="Radar Range", Min=50, Max=1000, Default=300, Suffix=" studs", Callback=function(v)
+    Settings.RadarRange=v
+end})
+
+-- ══════════════════════════════════════════
+-- TAB: TOOLS
+-- ══════════════════════════════════════════
+local ToolsTab = Window:CreateTab("Tools", "🔧")
+
+ToolsTab:CreateToggle({Title="Ghost Replay", Default=false, Callback=function(v)
+    Settings.GhostReplay=v
+    if not v then
+        for _, l in ipairs(GhostLines) do l:Remove() end
+        GhostLines={}
+    end
+    PushNotif("Ghost Replay", v and "Recording..." or "Stopped", 2)
+end})
+
+ToolsTab:CreateButton({Title="Clear Ghost Trail", Callback=function()
+    GhostPoints={}
+    for _, l in ipairs(GhostLines) do l:Remove() end
+    GhostLines={}
+    PushNotif("Ghost Replay", "Cleared", 2)
+end})
+
+ToolsTab:CreateToggle({Title="Heatmap", Default=false, Callback=function(v)
+    Settings.Heatmap=v
+    if not v then
+        for _, l in ipairs(HeatmapDrawLines) do l:Remove() end
+        HeatmapDrawLines={}
+    end
+    PushNotif("Heatmap", v and "ON" or "OFF", 2)
+end})
+
+ToolsTab:CreateButton({Title="Clear Heatmap Data", Callback=function()
+    HeatmapData={}
+    for _, l in ipairs(HeatmapDrawLines) do l:Remove() end
+    HeatmapDrawLines={}
+end})
+
+ToolsTab:CreateToggle({Title="Auto Respawn", Default=false, Callback=function(v)
+    Settings.AutoRespawn=v
+    SetupAutoRespawn()
+    PushNotif("Auto Respawn", v and "ON" or "OFF", 2)
+end})
+
+ToolsTab:CreateToggle({Title="Resource Counter", Default=false, Callback=function(v)
+    if v then CreateResourceCounter()
+    else DestroyResourceCounter() end
+end})
+
+-- ══════════════════════════════════════════
+-- TAB: CONFIG
+-- ══════════════════════════════════════════
+local CfgTab = Window:CreateTab("Config", "💾")
+
+CfgTab:CreateButton({Title="Save Config", Callback=function()
+    SaveConfig()
+    PushNotif("Config", "Saved!", 2)
+end})
+
+CfgTab:CreateButton({Title="Load Config", Callback=function()
+    LoadConfig()
+    PushNotif("Config", "Loaded!", 2)
+end})
+
+CfgTab:CreateButton({Title="Reset to Default", Callback=function()
+    for k,v in pairs(DefaultConfig) do Settings[k]=v end
+    PushNotif("Config", "Reset to default", 2)
+end})
+
+CfgTab:CreateColorPicker({Title="Accent Color", Default=Color3.fromRGB(180,100,255), Callback=function(v)
+    Settings.AccentColor={r=math.floor(v.R*255), g=math.floor(v.G*255), b=math.floor(v.B*255)}
+end})
+
+CfgTab:CreateLabel("AimbotSuite Premium v3.0")
+CfgTab:CreateLabel("Delta Compatible")
+
+-- ══════════════════════════════════════════
+-- TAB: SETTINGS / DESTROY
+-- ══════════════════════════════════════════
+local SettingsTab = Window:CreateTab("Settings", "⚙")
+
+SettingsTab:CreateButton({Title="Reset ESP", Callback=function()
+    for p in pairs(ESPObjects) do RemoveESP(p) end
+    PushNotif("ESP", "Reset", 2)
+end})
+
+SettingsTab:CreateButton({Title="Destroy GUI", Callback=function()
+    for _, conn in ipairs(AllConnections) do
+        if conn then conn:Disconnect() end
+    end
+    for p in pairs(ESPObjects) do RemoveESP(p) end
+    for _, l in ipairs(GhostLines) do l:Remove() end
+    for _, l in ipairs(HeatmapDrawLines) do l:Remove() end
+    fovCircle:Remove()
+    DestroyRadar()
+    DestroyResourceCounter()
+    Window:Destroy()
+end})
+
+-- ══════════════════════════════════════════
+-- NOTIFICATION QUEUE RUNNER
+-- (runs after UI setup so Window exists)
+-- ══════════════════════════════════════════
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if #NotifQueue > 0 and not NotifRunning then
+            NotifRunning = true
+            local n = table.remove(NotifQueue, 1)
+            pcall(function()
+                Window:Notify(n.title, n.msg, n.duration)
+            end)
+            task.wait(n.duration + 0.3)
+            NotifRunning = false
+        end
+    end
+end)
+
+PushNotif("AimbotSuite", "Loaded v3.0", 3)

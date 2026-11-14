@@ -1,0 +1,31 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.tpcooking.aimsuite'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.tpcooking.aimsuite'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '3.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Signed with the debug key so the release APK from CI is
+            // directly installable for testing. Replace with a real
+            // keystore before publishing to a store.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
